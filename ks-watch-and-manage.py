@@ -26,9 +26,12 @@
 import sys
 import os
 import time
+import urllib
 import urllib2
+import cookielib
 import HTMLParser
-import webbrowser
+# import webbrowser
+import pprint
 
 statuses = ['reward', 'reward shipping', 'disabled reward',
            'disabled reward shipping', 'last reward shipping']
@@ -54,8 +57,10 @@ class KickstarterHTMLParser(HTMLParser.HTMLParser):
     def __init__(self):
         HTMLParser.HTMLParser.__init__(self)
         self.in_li_block = False    # True == we're inside an <li class='...'> block
+        self.in_form_block = False    # True == we're inside an <form class='...'> block
         self.in_remaining_block = False # True == we're inside a <p class="remaining"> block
         self.in_desc_block = False # True == we're inside a <p class="description short"> block
+        self.in_international_block = False # True == we're inside a <span class="international"> block
 
     def process(self, url) :
         while True:
@@ -75,6 +80,8 @@ class KickstarterHTMLParser(HTMLParser.HTMLParser):
         html = unicode(f.read(), 'utf-8')
         f.close()
         self.rewards = []
+        self.logged_in = False
+        self.form_hidden_inputs = {}
         self.feed(html)   # feed() starts the HTMLParser parsing
         return self.rewards
 
@@ -88,48 +95,78 @@ class KickstarterHTMLParser(HTMLParser.HTMLParser):
             return
 
         # Extract the pledge amount (the cost)
-        if self.in_li_block and tag == 'input':
-            # remove everything except the actual number
-            amount = attrs['title'].encode('ascii','ignore')
-            nondigits = amount.translate(None, '0123456789.')
-            amount = amount.translate(None, nondigits)
-            # Convert the value into a float
-            self.value = float(amount)
-            self.ident = attrs['id']
+        if self.in_li_block:
+            if tag == 'input':
+                # remove everything except the actual number
+                # Convert the value into a float
+                self.value = float(self.parse_only_digits(attrs['title']))
+                # Convert the value into an int
+                self.ident = int(float(self.parse_only_digits(attrs['id'])))
 
-        if self.in_li_block and tag == 'p':
-            if attrs['class'] == 'remaining':
-                self.in_remaining_block = True
-            if attrs['class'] == 'description full':
-                self.in_desc_block = True
+            if tag == 'p':
+                if attrs['class'] == 'remaining':
+                    self.in_remaining_block = True
+                if attrs['class'] == 'description full':
+                    self.in_desc_block = True
+
+            if tag == 'span' and attrs['class'] == 'international':
+                self.in_international_block = True
+
+
+        if self.in_form_block and tag == 'input' and attrs['class'] == 'hidden':
+            self.form_hidden_inputs[attrs['name']] = attrs['value']
 
         # We only care about certain kinds of reward levels -- those that
         # might be limited.
-        if tag == 'li' and attrs['class'] in statuses:
-            self.in_li_block = True
-            # Remember the status of this <li> block
-            self.status = attrs['class']
-            self.remaining = ''
-            self.description = ''
+        if tag == 'li':
+            if attrs['class'] in statuses:
+                self.in_li_block = True
+                # Remember the status of this <li> block
+                self.status = attrs['class']
+                self.remaining = ''
+                self.description = ''
+                self.international_delivery = 0.0
+            elif 'id' in attrs and attrs['id'] == 'menu-sub-me':
+                self.logged_in = True
+
+        if tag == 'form' and attrs['class'] == 'manage_pledge':
+            self.in_form_block = True
 
     def handle_endtag(self, tag):
         if tag == 'li':
-            if self.in_li_block and self.remaining:
+            if self.in_li_block:
                 self.rewards.append((self.value,
                     self.status,
-                    self.remaining,
+                    self.remaining if self.remaining else 'Unlimited',
                     self.ident,
-                    ' '.join(self.description.split())))
+                    ' '.join(self.description.split()),
+                    self.international_delivery))
             self.in_li_block = False
+
         if tag == 'p':
             self.in_remaining_block = False
             self.in_desc_block = False
+
+        if tag == 'span':
+            self.in_international_block = False
+
+        if tag == 'form':
+            self.in_form_block = False
 
     def handle_data(self, data):
         if self.in_remaining_block:
             self.remaining += data
         if self.in_desc_block:
             self.description += self.unescape(data)
+        if self.in_international_block:
+            # remove everything except the actual number
+            # Convert the value into a float
+            self.international_delivery = float(self.parse_only_digits(data))
+    
+    def parse_only_digits(self, data):
+        amount = data.encode('ascii','ignore')
+        nondigits = amount.translate(None, '0123456789.')
+        return amount.translate(None, nondigits)
 
     def result(self):
         return self.rewards
@@ -155,16 +192,27 @@ def pledge_menu(rewards):
 
 # Generate the URL
 url = sys.argv[1].split('?', 1)[0]  # drop the stuff after the ?
+post_url = url + '/pledge'
 url += '/pledge/new' # we want the pledge-editing page
 pledges = None   # The pledge amounts on the command line
 ids = None       # A list of IDs of the pledge levels
 selected = None  # A list of selected pledge levels
 rewards = None   # A list of valid reward levels
+
+status_changed = False
+
 if len(sys.argv) > 2:
     pledges = map(float, sys.argv[2:])
 
 stats = None   # A list of the initial statuses of the selected pledge level
 ks = KickstarterHTMLParser()
+
+cj = cookielib.MozillaCookieJar('/home/birla/ks/cookie.txt')
+cj.load()
+cookie_opener = urllib2.build_opener(urllib2.HTTPCookieProcessor(cj))
+# urllib2.install_opener(cookie_opener)
+proxy_handler = urllib2.ProxyHandler({})
+blank_opener = urllib2.build_opener(proxy_handler)
 
 while True:
     rewards = ks.process(url)
@@ -187,10 +235,33 @@ while True:
         stats = [s[1] for s in selected]
 
     for stat, s, id in zip(stats, selected, ids):
-        if stat != s[1]:
-            print 'Status changed!'
-            webbrowser.open_new_tab(url)
-            ids = [x for x in ids if x != id]   # Remove the pledge we just found
+        if stat != s[1] or s[2] == 'Unlimited':
+
+            if not status_changed:
+                print 'Status changed!'
+                print 'Fetching the page with user credentials'
+                urllib2.install_opener(cookie_opener)
+                status_changed = True
+            else:
+                print 'Creating re-pledge request'
+                submit_data = ks.form_hidden_inputs
+                submit_data['backing[amount]'] = s[0]
+                if submit_data['backing[domestic]'] == '0':
+                    submit_data['backing[amount]'] += s[5] #international shipping
+                submit_data['backing[backer_reward_id]'] = id
+                data = urllib.urlencode(submit_data)
+
+                result = urllib2.urlopen(url=post_url, data=data).read()
+
+                print 'Re-pledged!!!'
+
+                ids = [x for x in ids if x != id]   # Remove the pledge we just found
+                urllib2.install_opener(blank_opener)
+
+
+            # webbrowser.open_new_tab(url)
+
+            #ids = [x for x in ids if x != id]   # Remove the pledge we just found
             if not ids:     # If there are no more pledges to check, then exit
                 time.sleep(10)   # Give the web browser time to open
                 sys.exit(0)
@@ -198,4 +269,7 @@ while True:
 
     print [str(s[2]) for s in selected]
 
-    time.sleep(60)
+    # pprint.pprint(selected)
+
+    if not status_changed:
+        time.sleep(60)
