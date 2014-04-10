@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 
 # Copyright 2013, Timur Tabi
+# Copyright 2014, Prakhar Birla
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions are met:
@@ -30,37 +31,29 @@ import urllib
 import urllib2
 import cookielib
 import HTMLParser
-# import webbrowser
+import json
+import webbrowser
+import argparse
 import pprint
 
-statuses = ['reward', 'reward shipping', 'disabled reward',
-           'disabled reward shipping', 'last reward shipping']
-
-# Parse the pledge HTML page
+# Instead of parsing the HTML, we will parse some Javascript variables
+# embedded in the page. The values contained in them are mostly json
+# strings. These variables get a lot of data regarding the project,
+# assumably KS uses this to partially render the page in the browser.
 #
-# It looks like this:
-#
-# <li class="reward shipping" ...>
-# <input alt="$75.00" ... title="$75.00" />
-# ...
-# </li>
-#
-# So we need to scan the HTML looking for <li> tags with the proper class,
-# (the class is the status of that pledge level), and then remember that
-# status as we parse inside the <li> block.  The <input> tag contains a title
-# with the pledge amount.  We return a list of tuples that include the pledge
-# level, its status, and the number of remaining slots
+# Along with the project information, this also contains the logged in
+# user info. Unfortunately the amazon pledge authorization is not
+# included, hence it's impossible to find out the limit of raising the
+# pledges. Due to this I recommend that you pledge for a higher amount
+# and let the script handle to rest.
 #
 # The 'rewards' dictionary uses the reward value as a key, and
 # (status, remaining) as the value.
 class KickstarterHTMLParser(HTMLParser.HTMLParser):
     def __init__(self):
         HTMLParser.HTMLParser.__init__(self)
-        self.in_li_block = False    # True == we're inside an <li class='...'> block
         self.in_form_block = False    # True == we're inside an <form class='...'> block
-        self.in_remaining_block = False # True == we're inside a <p class="remaining"> block
-        self.in_desc_block = False # True == we're inside a <p class="description short"> block
-        self.in_international_block = False # True == we're inside a <span class="international"> block
+        self.in_script_block = False # True == we're inside a <script> block
 
     def process(self, url) :
         while True:
@@ -80,9 +73,32 @@ class KickstarterHTMLParser(HTMLParser.HTMLParser):
         html = unicode(f.read(), 'utf-8')
         f.close()
         self.rewards = []
-        self.logged_in = False
         self.form_hidden_inputs = {}
+        self.json_variables = {}
+
+        print html
         self.feed(html)   # feed() starts the HTMLParser parsing
+
+        # if the json variable current_project was loaded, then
+        # move information contained in the respective fields
+        if 'current_project' in self.json_variables:
+            for reward in self.json_variables['current_project']['rewards']:
+                if 'limit' in reward: # only put limited rewards
+                    self.rewards.append((
+                        float(reward['minimum']),
+                        reward['remaining'],
+                        str(reward['remaining']) + ' of ' + str(reward['limit']),
+                        reward['project_id'],
+                        reward['reward'],
+                        float(reward['shipping_amount']) if reward['shipping_applicable'] else 0.0))
+        
+        self.logged_in = True if 'current_user' in self.json_variables else False
+
+        self.pre_pledged = {'amount':self.json_variables['current_checkout']['amount'],
+        'id':self.json_variables['current_checkout']['reward']['id']} if 'current_checkout' in self.json_variables and self.json_variables['current_checkout']['amount'] > 0 else {'amount':0,'id':0}
+
+        pprint.pprint(self.rewards)
+        pprint.pprint(self.pre_pledged)
         return self.rewards
 
     def handle_starttag(self, tag, attributes):
@@ -90,83 +106,53 @@ class KickstarterHTMLParser(HTMLParser.HTMLParser):
 
         attrs = dict(attributes)
 
+        if tag == 'script' and len(attrs) == 0:
+            self.in_script_block = True
+
+        # TODO instead of this, just read the meta tags
+        # and disengage the parsing when the body tag is reached
+
         # It turns out that we only care about tags that have a 'class' attribute
         if not 'class' in attrs:
             return
-
-        # Extract the pledge amount (the cost)
-        if self.in_li_block:
-            if tag == 'input':
-                # remove everything except the actual number
-                # Convert the value into a float
-                self.value = float(self.parse_only_digits(attrs['title']))
-                # Convert the value into an int
-                self.ident = int(float(self.parse_only_digits(attrs['id'])))
-
-            if tag == 'p':
-                if attrs['class'] == 'remaining':
-                    self.in_remaining_block = True
-                if attrs['class'] == 'description full':
-                    self.in_desc_block = True
-
-            if tag == 'span' and attrs['class'] == 'international':
-                self.in_international_block = True
-
-
+        if tag == 'form' and attrs['class'] == 'manage_pledge':
+            self.in_form_block = True
         if self.in_form_block and tag == 'input' and attrs['class'] == 'hidden':
             self.form_hidden_inputs[attrs['name']] = attrs['value']
 
-        # We only care about certain kinds of reward levels -- those that
-        # might be limited.
-        if tag == 'li':
-            if attrs['class'] in statuses:
-                self.in_li_block = True
-                # Remember the status of this <li> block
-                self.status = attrs['class']
-                self.remaining = ''
-                self.description = ''
-                self.international_delivery = 0.0
-            elif 'id' in attrs and attrs['id'] == 'menu-sub-me':
-                self.logged_in = True
-
-        if tag == 'form' and attrs['class'] == 'manage_pledge':
-            self.in_form_block = True
-
     def handle_endtag(self, tag):
-        if tag == 'li':
-            if self.in_li_block:
-                self.rewards.append((self.value,
-                    self.status,
-                    self.remaining if self.remaining else 'Unlimited',
-                    self.ident,
-                    ' '.join(self.description.split()),
-                    self.international_delivery))
-            self.in_li_block = False
-
-        if tag == 'p':
-            self.in_remaining_block = False
-            self.in_desc_block = False
-
-        if tag == 'span':
-            self.in_international_block = False
-
         if tag == 'form':
             self.in_form_block = False
 
+        if tag == 'script':
+            self.in_script_block = False
+
     def handle_data(self, data):
-        if self.in_remaining_block:
-            self.remaining += data
-        if self.in_desc_block:
-            self.description += self.unescape(data)
-        if self.in_international_block:
-            # remove everything except the actual number
-            # Convert the value into a float
-            self.international_delivery = float(self.parse_only_digits(data))
-    
-    def parse_only_digits(self, data):
-        amount = data.encode('ascii','ignore')
-        nondigits = amount.translate(None, '0123456789.')
-        return amount.translate(None, nondigits)
+        if self.in_script_block:
+            # find the variable we are interested in
+            start = data.find("current_");
+            # only consider if it's in the beinning
+            if start > 0 and start < 30:
+                # trim the last 8 chars
+                data = data[start:-8]
+                if data.count('\n') == 1:
+                    # extract the variable name
+                    variable_name =  data[:data.find(' ')]
+                    # extract the raw json and do a html decode
+                    raw_json = self.unescape(data[data.find('= ')+2:data.rfind(';')])
+                    # trim quotes, if present
+                    if raw_json[0] == '"' and raw_json[-1] == '"':
+                        raw_json = raw_json[1:-1]
+                    # json decode the string.. i.e. make it an object
+                    self.json_variables[variable_name] = json.loads(raw_json)
+                    # print variable_name
+                    # print raw_json
+                    # pprint.pprint(self.json_variables[variable_name])
+
+    # def parse_only_digits(self, data):
+    #     amount = data.encode('ascii','ignore')
+    #     nondigits = amount.translate(None, '0123456789.')
+    #     return amount.translate(None, nondigits)
 
     def result(self):
         return self.rewards
@@ -181,6 +167,7 @@ def pledge_menu(rewards):
 
     for i in xrange(count):
         print '%u. $%u %s' % (i + 1, rewards[i][0], rewards[i][4][:70])
+        print '\t\t %s' % (rewards[i][2])
 
     while True:
         try:
@@ -190,31 +177,78 @@ def pledge_menu(rewards):
         except (IndexError, NameError, SyntaxError):
             continue
 
+parser = argparse.ArgumentParser(
+    description="This script notifies you when a locked Kickstarter" +
+    " pledge level becomes available and optionally, manage your pledge.")
+parser.add_argument("url", help="project home page URL",
+    metavar="URL")
+parser.add_argument("-v", "--verbose", action="store_true",
+    help="ask questions to set up the options")
+parser.add_argument("-pa", "--pledge-amount", action='store_true',
+    help="pledges specified in terms of the currency amount")
+parser.add_argument("-i", "--interval", type=int,
+    choices=xrange(1, 11), default=5,
+    help="frequency in minutes to check the project page for changes" +
+    " (default: %(default)s)")
+parser.add_argument("-c", "--cookies", type=file,
+    metavar="COOKIES-FILE",
+    help="path to the cookies file used to manage the pledge" +
+    " (only the Netscape format is accepted)")
+parser.add_argument("-d", "--destroy", action="store_true",
+    help="destroy (/cancel) pledge if the required pledge(s) couldn't be" +
+    " selected (requires cookies)")
+parser.add_argument("-dt", "--destroy-threshhold", type=int,
+    choices=xrange(1, 11), default=5,
+    help="time (in minutes) to project completion to destroy the pledge" +
+    " (default: %(default)s) (requires cookies)")
+parser.add_argument("-p", "--pledge", nargs="*", type=int,
+    help="pledges (numbers separated by spaces) ordered" +
+    " by priority, highest to lowest")
+args = parser.parse_args()
+
+pprint.pprint(args)
+sys.exit(0)
+
 # Generate the URL
-url = sys.argv[1].split('?', 1)[0]  # drop the stuff after the ?
-post_url = url + '/pledge'
+url = args.url.split('?', 1)[0]  # drop the stuff after the ?
+base_url = url
 url += '/pledge/new' # we want the pledge-editing page
 pledges = None   # The pledge amounts on the command line
 ids = None       # A list of IDs of the pledge levels
 selected = None  # A list of selected pledge levels
 rewards = None   # A list of valid reward levels
+use_credentials = False
 
 status_changed = False
 
-if len(sys.argv) > 2:
-    pledges = map(float, sys.argv[2:])
+# if len(sys.argv) > 2:
+#     pledges = map(float, sys.argv[2:])
 
 stats = None   # A list of the initial statuses of the selected pledge level
 ks = KickstarterHTMLParser()
 
-cj = cookielib.MozillaCookieJar('/home/birla/ks/cookie.txt')
-cj.load()
-cookie_opener = urllib2.build_opener(urllib2.HTTPCookieProcessor(cj))
+if args.cookies:
+    cj = cookielib.MozillaCookieJar(args.cookies.name)
+    cj.load()
+    cookie_opener = urllib2.build_opener(urllib2.HTTPCookieProcessor(cj))
+    use_credentials = True
+
 # urllib2.install_opener(cookie_opener)
 proxy_handler = urllib2.ProxyHandler({})
 blank_opener = urllib2.build_opener(proxy_handler)
+urllib2.install_opener(blank_opener)
+
+test_completed = False
 
 while True:
+
+    if use_credentials:
+        print 'Fetching the page with user credentials'
+        urllib2.install_opener(cookie_opener)
+        use_credentials = False
+    else:
+        urllib2.install_opener(blank_opener)
+
     rewards = ks.process(url)
 
     if not rewards:
@@ -233,18 +267,22 @@ while True:
 
         ids = [s[3] for s in selected]
         stats = [s[1] for s in selected]
+        priority = range(0,len(ids))
+        pledge_priority_reached = len(ids) + 1
 
-    for stat, s, id in zip(stats, selected, ids):
+    for stat, s, id, current_priority in zip(stats, selected, ids, priority):
         if stat != s[1] or s[2] == 'Unlimited':
 
             if not status_changed:
                 print 'Status changed!'
-                print 'Fetching the page with user credentials'
-                urllib2.install_opener(cookie_opener)
+                use_credentials = True
+                
                 status_changed = True
             else:
                 print 'Creating re-pledge request'
                 submit_data = ks.form_hidden_inputs
+                # urllib.encode doesn't support encoding of utf8 characters
+                submit_data['utf8'] = ''
                 submit_data['backing[amount]'] = s[0]
                 if submit_data['backing[domestic]'] == '0':
                     submit_data['backing[amount]'] += s[5] #international shipping
@@ -255,14 +293,15 @@ while True:
 
                 print 'Re-pledged!!!'
 
+                pledge_priority_reached = current_priority
                 ids = [x for x in ids if x != id]   # Remove the pledge we just found
-                urllib2.install_opener(blank_opener)
+                priority.pop()
 
 
             # webbrowser.open_new_tab(url)
 
             #ids = [x for x in ids if x != id]   # Remove the pledge we just found
-            if not ids:     # If there are no more pledges to check, then exit
+            if not ids or current_priority =:     # If there are no more pledges to check, then exit
                 time.sleep(10)   # Give the web browser time to open
                 sys.exit(0)
             break   # Otherwise, keep going
