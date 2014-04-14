@@ -76,7 +76,6 @@ class KickstarterHTMLParser(HTMLParser.HTMLParser):
         self.form_hidden_inputs = {}
         self.json_variables = {}
 
-        print html
         self.feed(html)   # feed() starts the HTMLParser parsing
 
         # if the json variable current_project was loaded, then
@@ -178,8 +177,9 @@ def pledge_menu(rewards):
             continue
 
 parser = argparse.ArgumentParser(
-    description="This script notifies you when a locked Kickstarter" +
-    " pledge level becomes available and optionally, manage your pledge.")
+    description="This script notifies you by opening the manage pledge page" +
+    " in the browser when a locked Kickstarter  pledge level becomes available" +
+    " or optionally, change your pledge automatically.")
 parser.add_argument("url", help="project home page URL",
     metavar="URL")
 parser.add_argument("-v", "--verbose", action="store_true",
@@ -190,6 +190,8 @@ parser.add_argument("-i", "--interval", type=int,
     choices=xrange(1, 11), default=5,
     help="frequency in minutes to check the project page for changes" +
     " (default: %(default)s)")
+parser.add_argument("-nb", "--no-browser", action="store_true",
+    help="don't open the browser when a pledge is unlocked, default false")
 parser.add_argument("-c", "--cookies", type=file,
     metavar="COOKIES-FILE",
     help="path to the cookies file used to manage the pledge" +
@@ -199,7 +201,7 @@ parser.add_argument("-d", "--destroy", action="store_true",
     " selected (requires cookies)")
 parser.add_argument("-dt", "--destroy-threshhold", type=int,
     choices=xrange(1, 11), default=5,
-    help="time (in minutes) to project completion to destroy the pledge" +
+    help="time (in minutes) to project completion to destroy (cancel) the pledge" +
     " (default: %(default)s) (requires cookies)")
 parser.add_argument("-p", "--pledge", nargs="*", type=int,
     help="pledges (numbers separated by spaces) ordered" +
@@ -221,10 +223,9 @@ use_credentials = False
 
 status_changed = False
 
-# if len(sys.argv) > 2:
-#     pledges = map(float, sys.argv[2:])
-
 stats = None   # A list of the initial statuses of the selected pledge level
+priority = None
+
 ks = KickstarterHTMLParser()
 
 if args.cookies:
@@ -233,7 +234,6 @@ if args.cookies:
     cookie_opener = urllib2.build_opener(urllib2.HTTPCookieProcessor(cj))
     use_credentials = True
 
-# urllib2.install_opener(cookie_opener)
 proxy_handler = urllib2.ProxyHandler({})
 blank_opener = urllib2.build_opener(proxy_handler)
 urllib2.install_opener(blank_opener)
@@ -301,7 +301,9 @@ while True:
             # webbrowser.open_new_tab(url)
 
             #ids = [x for x in ids if x != id]   # Remove the pledge we just found
-            if not ids or current_priority =:     # If there are no more pledges to check, then exit
+
+            # If there are no more pledges to check or the top priority is reached, then exit
+            if not ids or pledge_priority_reached == 0:
                 time.sleep(10)   # Give the web browser time to open
                 sys.exit(0)
             break   # Otherwise, keep going
