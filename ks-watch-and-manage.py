@@ -50,15 +50,16 @@ import pprint
 # The 'rewards' dictionary uses the reward value as a key, and
 # (status, remaining) as the value.
 class KickstarterHTMLParser(HTMLParser.HTMLParser):
-    def __init__(self):
+    def __init__(self, url):
         HTMLParser.HTMLParser.__init__(self)
         self.in_form_block = False    # True == we're inside an <form class='...'> block
         self.in_script_block = False # True == we're inside a <script> block
+        self.url = url
 
-    def process(self, url) :
+    def process(self) :
         while True:
             try:
-                f = urllib2.urlopen(url)
+                f = urllib2.urlopen(self.url)
                 break
             except urllib2.HTTPError as e:
                 print 'HTTP Error', e
@@ -156,6 +157,46 @@ class KickstarterHTMLParser(HTMLParser.HTMLParser):
     def result(self):
         return self.rewards
 
+class KickstarterPledgeManage:
+    def __init__(self, cookies, parser):
+        self.cookie_jar = cookielib.MozillaCookieJar(cookies.name)
+        self.cookie_jar.load()
+        self.cookie_opener = urllib2.build_opener(urllib2.HTTPCookieProcessor(self.cookie_jar))
+        self.parser = parser
+        self.proxy_handler = urllib2.ProxyHandler({})
+        self.blank_opener = urllib2.build_opener(self.proxy_handler)
+
+    def run_test(self):
+        self.engage_cookie() # use the cookies
+        self.parser.process() # fetch the page
+        result = self.parser.logged_in
+        self.disengage_cookie()
+        return result
+
+    def change_pledge(self, id):
+        self.engage_cookie() # use the cookies
+        rewards = self.parser.process() # fetch the page
+
+        print 'Creating re-pledge request'
+        submit_data = self.parser.form_hidden_inputs
+        # urllib.encode doesn't support encoding of utf8 characters
+        submit_data['utf8'] = ''
+        submit_data['backing[amount]'] = s[0]
+        if submit_data['backing[domestic]'] == '0':
+            submit_data['backing[amount]'] += s[5] #international shipping
+        submit_data['backing[backer_reward_id]'] = id
+        data = urllib.urlencode(submit_data)
+
+        result = urllib2.urlopen(url=post_url, data=data).read()
+        self.disengage_cookie()
+
+    def engage_cookie(self):
+        urllib2.install_opener(self.cookie_opener)
+
+    def disengage_cookie(self):
+        urllib2.install_opener(self.blank_opener)
+
+
 def pledge_menu(rewards):
     import re
 
@@ -206,6 +247,8 @@ parser.add_argument("-dt", "--destroy-threshhold", type=int,
 parser.add_argument("-p", "--pledge", nargs="*", type=int,
     help="pledges (numbers separated by spaces) ordered" +
     " by priority, highest to lowest")
+parser.add_argument("-np", "--no-priority", action="store_true",
+    help="pleges don't have any priority")
 args = parser.parse_args()
 
 pprint.pprint(args)
@@ -221,35 +264,22 @@ selected = None  # A list of selected pledge levels
 rewards = None   # A list of valid reward levels
 use_credentials = False
 
-status_changed = False
-
 stats = None   # A list of the initial statuses of the selected pledge level
 priority = None
+test_passed = True
 
-ks = KickstarterHTMLParser()
+ks = KickstarterHTMLParser(url)
 
 if args.cookies:
-    cj = cookielib.MozillaCookieJar(args.cookies.name)
-    cj.load()
-    cookie_opener = urllib2.build_opener(urllib2.HTTPCookieProcessor(cj))
+    # need to test the credentials
     use_credentials = True
+    pledge_manage = KickstarterPledgeManage(args.cookies)
+    test_passed = pledge_manage.run_test()
 
-proxy_handler = urllib2.ProxyHandler({})
-blank_opener = urllib2.build_opener(proxy_handler)
-urllib2.install_opener(blank_opener)
-
-test_completed = False
 
 while True:
 
-    if use_credentials:
-        print 'Fetching the page with user credentials'
-        urllib2.install_opener(cookie_opener)
-        use_credentials = False
-    else:
-        urllib2.install_opener(blank_opener)
-
-    rewards = ks.process(url)
+    rewards = ks.process()
 
     if not rewards:
         print 'No limited rewards for this Kickstarter'
@@ -271,36 +301,23 @@ while True:
         pledge_priority_reached = len(ids) + 1
 
     for stat, s, id, current_priority in zip(stats, selected, ids, priority):
-        if stat != s[1] or s[2] == 'Unlimited':
+        if stat != s[1] or s[2] == 'Unlimited' and current_priority < pledge_priority_reached:
 
-            if not status_changed:
-                print 'Status changed!'
-                use_credentials = True
-                
-                status_changed = True
-            else:
-                print 'Creating re-pledge request'
-                submit_data = ks.form_hidden_inputs
-                # urllib.encode doesn't support encoding of utf8 characters
-                submit_data['utf8'] = ''
-                submit_data['backing[amount]'] = s[0]
-                if submit_data['backing[domestic]'] == '0':
-                    submit_data['backing[amount]'] += s[5] #international shipping
-                submit_data['backing[backer_reward_id]'] = id
-                data = urllib.urlencode(submit_data)
-
-                result = urllib2.urlopen(url=post_url, data=data).read()
-
+            if use_credentials:
+                manage_pledge.change(id)
                 print 'Re-pledged!!!'
+            else :
+                webbrowser.open_new_tab(url)
 
-                pledge_priority_reached = current_priority
-                ids = [x for x in ids if x != id]   # Remove the pledge we just found
-                priority.pop()
+            pledge_priority_reached = current_priority
+            
+            # ids = [x for x in ids if x != id]   # Remove the pledge we just found
+            # priority.pop()
 
+            del ids[current_priority:len(ids)] # Remove the pledge we just found, and all the next ones
+            priority = range(0,len(ids))
+            
 
-            # webbrowser.open_new_tab(url)
-
-            #ids = [x for x in ids if x != id]   # Remove the pledge we just found
 
             # If there are no more pledges to check or the top priority is reached, then exit
             if not ids or pledge_priority_reached == 0:
