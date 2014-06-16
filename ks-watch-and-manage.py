@@ -97,8 +97,9 @@ class KickstarterHTMLParser(HTMLParser.HTMLParser):
         self.pre_pledged = {'amount':self.json_variables['current_checkout']['amount'],
         'id':self.json_variables['current_checkout']['reward']['id']} if 'current_checkout' in self.json_variables and self.json_variables['current_checkout']['amount'] > 0 else {'amount':0,'id':0}
 
-        pprint.pprint(self.rewards)
-        pprint.pprint(self.pre_pledged)
+        # pprint.pprint(self.rewards)
+        # pprint.pprint(self.pre_pledged)
+        
         return self.rewards
 
     def handle_starttag(self, tag, attributes):
@@ -133,16 +134,20 @@ class KickstarterHTMLParser(HTMLParser.HTMLParser):
             start = data.find("current_");
             # only consider if it's in the beinning
             if start > 0 and start < 30:
+                # print data
                 # trim the last 8 chars
                 data = data[start:-8]
                 if data.count('\n') == 1:
                     # extract the variable name
                     variable_name =  data[:data.find(' ')]
-                    # extract the raw json and do a html decode
-                    raw_json = self.unescape(data[data.find('= ')+2:data.rfind(';')])
+                    # extract the raw json and do a html decode, and some weird bug python unscape
+                    raw_json = self.unescape(data[data.find('= ')+2:data.rfind(';')]).replace('\\"','\"')
                     # trim quotes, if present
                     if raw_json[0] == '"' and raw_json[-1] == '"':
                         raw_json = raw_json[1:-1]
+                    # print ""
+                    # print raw_json
+                    # print ""
                     # json decode the string.. i.e. make it an object
                     self.json_variables[variable_name] = json.loads(raw_json)
                     # print variable_name
@@ -158,8 +163,9 @@ class KickstarterHTMLParser(HTMLParser.HTMLParser):
         return self.rewards
 
 class KickstarterPledgeManage:
-    def __init__(self, cookies, parser):
-        self.cookie_jar = cookielib.MozillaCookieJar(cookies.name)
+    def __init__(self, cookies_file, parser):
+        print cookies_file
+        self.cookie_jar = cookielib.MozillaCookieJar(cookies_file)
         self.cookie_jar.load()
         self.cookie_opener = urllib2.build_opener(urllib2.HTTPCookieProcessor(self.cookie_jar))
         self.parser = parser
@@ -252,7 +258,7 @@ parser.add_argument("-np", "--no-priority", action="store_true",
 args = parser.parse_args()
 
 pprint.pprint(args)
-sys.exit(0)
+# sys.exit(0)
 
 # Generate the URL
 url = args.url.split('?', 1)[0]  # drop the stuff after the ?
@@ -273,8 +279,10 @@ ks = KickstarterHTMLParser(url)
 if args.cookies:
     # need to test the credentials
     use_credentials = True
-    pledge_manage = KickstarterPledgeManage(args.cookies)
-    test_passed = pledge_manage.run_test()
+    pledge_manage = KickstarterPledgeManage(args.cookies.name, ks)
+    if not pledge_manage.run_test():
+        print 'Unable to login to Kickstarter using the cookies provided'
+        sys.exit(0)
 
 
 while True:
