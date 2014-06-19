@@ -154,7 +154,7 @@ class KickstarterHTMLParser(HTMLParser.HTMLParser):
                         if (raw_json[0] == '\'' and raw_json[-1] == '\''): # trim quotes, if present
                             raw_json = raw_json[1:-1]
                         result = raw_json # consider the variable as a string
-                    
+
                     self.json_variables[variable_name] = result # save the result
                     # print "---"
                     # print variable_name
@@ -245,8 +245,6 @@ parser.add_argument("url", help="project home page URL",
     metavar="URL")
 parser.add_argument("-v", "--verbose", action="store_true",
     help="ask questions to set up the options")
-parser.add_argument("-pa", "--pledge-amount", action='store_true',
-    help="pledges specified in terms of the currency amount")
 parser.add_argument("-i", "--interval", type=int,
     choices=xrange(1, 11), default=5,
     help="frequency in minutes to check the project page for changes" +
@@ -267,8 +265,10 @@ parser.add_argument("-dt", "--destroy-threshhold", type=int,
 parser.add_argument("-p", "--pledge", nargs="*", type=int,
     help="pledges (numbers separated by spaces) ordered" +
     " by priority, highest to lowest")
+parser.add_argument("-pa", "--pledge-amount", nargs="*", action='store_true',
+    help="pledges specified in terms of the currency amount")
 parser.add_argument("-np", "--no-priority", action="store_true",
-    help="pleges don't have any priority")
+    help="pledges don't have any priority")
 args = parser.parse_args()
 
 pprint.pprint(args)
@@ -293,11 +293,13 @@ ks = KickstarterHTMLParser(url)
 if args.cookies:
     # need to test the credentials
     use_credentials = True
+    print 'Testing supplied credentials (cookies)'
     pledge_manage = KickstarterPledgeManage(args.cookies.name, ks)
     if not pledge_manage.run_test():
         print 'Unable to login to Kickstarter using the cookies provided'
         sys.exit(0)
-
+    else:
+        print 'Successfully logged into Kickstarter using cookies'
 
 while True:
 
@@ -306,6 +308,11 @@ while True:
     if not rewards:
         print 'No limited rewards for this Kickstarter'
         sys.exit(0)
+
+    if args.pledge-amount:
+        pledges = args.pledge
+    else:
+        ids = args.pledge
 
     if ids:
         selected = [r for r in rewards if r[3] in ids]
@@ -329,21 +336,23 @@ while True:
                 manage_pledge.change(id)
                 print 'Re-pledged!!!'
             else :
-                webbrowser.open_new_tab(url)
+                if args.no-browser:
+                    print 'Alert!!! Monitored pledge is unlocked'
+                else:
+                    webbrowser.open_new_tab(url)
+                    time.sleep(10)   # Give the web browser time to opens
 
             pledge_priority_reached = current_priority
             
             # ids = [x for x in ids if x != id]   # Remove the pledge we just found
             # priority.pop()
 
-            del ids[current_priority:len(ids)] # Remove the pledge we just found, and all the next ones
-            priority = range(0,len(ids))
-            
+            if not pledge_priority_reached == 0:
+                del ids[current_priority:len(ids)] # Remove the pledge we just found, and all the ones after it
+                priority = range(0,len(ids)) # Re-cache the priorities
 
-
-            # If there are no more pledges to check or the top priority is reached, then exit
-            if not ids or pledge_priority_reached == 0:
-                time.sleep(10)   # Give the web browser time to open
+            # If the top priority is reached or there are no more pledges to check, then exit
+            if (not args.no-priority and pledge_priority_reached == 0) or not ids:
                 sys.exit(0)
             break   # Otherwise, keep going
 
@@ -352,4 +361,4 @@ while True:
     # pprint.pprint(selected)
 
     if not status_changed:
-        time.sleep(60)
+        time.sleep(60 * args.interval) # sleep until the next try
