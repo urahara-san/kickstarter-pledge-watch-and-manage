@@ -135,24 +135,36 @@ class KickstarterHTMLParser(HTMLParser.HTMLParser):
             # only consider if it's in the beinning
             if start > 0 and start < 30:
                 # print data
-                # trim the last 8 chars
-                data = data[start:-8]
-                if data.count('\n') == 1:
-                    # extract the variable name
-                    variable_name =  data[:data.find(' ')]
+                data = data[start:-8] # trim the last 8 chars
+                each_line = data.split('\n') #process each line seperately
+                for line in each_line:
+                    start = line.find("current_") # find the variable we are interested in
+                    if start < 0:
+                        continue #process the next line if its not found
+                    
+                    variable_name =  line[start:line.find('=')-1] # extract the variable name
+
                     # extract the raw json and do a html decode, and some weird bug python unscape
-                    raw_json = self.unescape(data[data.find('= ')+2:data.rfind(';')]).replace('\\"','\"')
-                    # trim quotes, if present
-                    if raw_json[0] == '"' and raw_json[-1] == '"':
+                    raw_json = self.unescape(line[line.find('= ')+2:line.rfind(';')]).replace('\\"','\"')
+                    
+                    if (raw_json[0] == '"' and raw_json[-1] == '"'): # trim quotes, if present and decode as json
                         raw_json = raw_json[1:-1]
-                    # print ""
-                    # print raw_json
-                    # print ""
-                    # json decode the string.. i.e. make it an object
-                    self.json_variables[variable_name] = json.loads(raw_json)
+                        result = json.loads(raw_json) # json decode the string.. i.e. make it an object
+                    else:
+                        if (raw_json[0] == '\'' and raw_json[-1] == '\''): # trim quotes, if present
+                            raw_json = raw_json[1:-1]
+                        result = raw_json # consider the variable as a string
+                    
+                    self.json_variables[variable_name] = result # save the result
+                    # print "---"
                     # print variable_name
+                    # print "==="
+                    # print raw_json
+                    # print "---"
+                    
                     # print raw_json
                     # pprint.pprint(self.json_variables[variable_name])
+                
 
     # def parse_only_digits(self, data):
     #     amount = data.encode('ascii','ignore')
@@ -177,6 +189,8 @@ class KickstarterPledgeManage:
         self.parser.process() # fetch the page
         result = self.parser.logged_in
         self.disengage_cookie()
+
+        # pprint.pprint(self.parser.json_variables, indent = 2)
         return result
 
     def change_pledge(self, id):
