@@ -176,7 +176,6 @@ class KickstarterHTMLParser(HTMLParser.HTMLParser):
 
 class KickstarterPledgeManage:
     def __init__(self, cookies_file, parser):
-        print cookies_file
         self.cookie_jar = cookielib.MozillaCookieJar(cookies_file)
         self.cookie_jar.load()
         self.cookie_opener = urllib2.build_opener(urllib2.HTTPCookieProcessor(self.cookie_jar))
@@ -265,7 +264,7 @@ parser.add_argument("-dt", "--destroy-threshhold", type=int,
 parser.add_argument("-p", "--pledge", nargs="*", type=int,
     help="pledges (numbers separated by spaces) ordered" +
     " by priority, highest to lowest")
-parser.add_argument("-pa", "--pledge-amount", nargs="*", action='store_true',
+parser.add_argument("-pa", "--pledge-amount", action='store_true',
     help="pledges specified in terms of the currency amount")
 parser.add_argument("-np", "--no-priority", action="store_true",
     help="pledges don't have any priority")
@@ -309,7 +308,7 @@ while True:
         print 'No limited rewards for this Kickstarter'
         sys.exit(0)
 
-    if args.pledge-amount:
+    if args.pledge_amount:
         pledges = args.pledge
     else:
         ids = args.pledge
@@ -352,7 +351,7 @@ while True:
                 priority = range(0,len(ids)) # Re-cache the priorities
 
             # If the top priority is reached or there are no more pledges to check, then exit
-            if (not args.no-priority and pledge_priority_reached == 0) or not ids:
+            if (not args.no_priority and pledge_priority_reached == 0) or not ids:
                 sys.exit(0)
             break   # Otherwise, keep going
 
@@ -360,5 +359,4 @@ while True:
 
     # pprint.pprint(selected)
 
-    if not status_changed:
-        time.sleep(60 * args.interval) # sleep until the next try
+    time.sleep(60 * args.interval) # sleep until the next try
