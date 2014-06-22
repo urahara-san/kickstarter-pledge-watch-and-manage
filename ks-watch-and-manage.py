@@ -35,6 +35,10 @@ import json
 import webbrowser
 import argparse
 import pprint
+import logging
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("main")
 
 # Instead of parsing the HTML, we will parse some Javascript variables
 # embedded in the page. The values contained in them are mostly json
@@ -55,47 +59,59 @@ class KickstarterHTMLParser(HTMLParser.HTMLParser):
         self.in_form_block = False    # True == we're inside an <form class='...'> block
         self.in_script_block = False # True == we're inside a <script> block
         self.url = url
+        self.logger = logging.getLogger("parser")
 
     def process(self) :
         while True:
             try:
+            	self.logger.debug('Opening URL- ' + self.url)
                 f = urllib2.urlopen(self.url)
                 break
             except urllib2.HTTPError as e:
-                print 'HTTP Error', e
+            	self.logger.error('HTTP Error', exc_info=True)
             except urllib2.URLError as e:
+            	self.logger.error('URL Error', exc_info=True)
                 print 'URL Error', e
             except Exception as e:
-                print 'General Error', e
+            	self.logger.error('Error', exc_info=True)
 
-            print 'Retrying in one minute'
+            self.logger.info('Due to error, retrying in 1 minute')
             time.sleep(60)
 
         html = unicode(f.read(), 'utf-8')
         f.close()
+        self.logger.debug('Fetched URL successfully')
+
         self.rewards = []
         self.form_hidden_inputs = {}
         self.json_variables = {}
 
+
+        self.logger.debug('Parsing fetched content')
         self.feed(html)   # feed() starts the HTMLParser parsing
+        self.logger.debug('Completed parsing content')
 
         # if the json variable current_project was loaded, then
         # move information contained in the respective fields
         if 'current_project' in self.json_variables:
             for reward in self.json_variables['current_project']['rewards']:
-                if 'limit' in reward: # only put limited rewards
+                if reward['id'] == 0: continue
+                if True or 'limit' in reward: # only put limited rewards
+                    reward['remaining'] = reward['remaining'] if 'remaining' in reward else 1000
                     self.rewards.append((
                         float(reward['minimum']),
                         reward['remaining'],
-                        str(reward['remaining']) + ' of ' + str(reward['limit']),
-                        reward['project_id'],
-                        reward['reward'],
+                        str(reward['remaining']) + ' of ' + str(reward['limit']) if 'limit' in reward else 'Unlimited',
+                        reward['id'],
+                        reward['reward'].replace("\r\n",' '),
                         float(reward['shipping_amount']) if reward['shipping_applicable'] else 0.0))
         
         self.logged_in = True if 'current_user' in self.json_variables else False
 
         self.pre_pledged = {'amount':self.json_variables['current_checkout']['amount'],
-        'id':self.json_variables['current_checkout']['reward']['id']} if 'current_checkout' in self.json_variables and self.json_variables['current_checkout']['amount'] > 0 else {'amount':0,'id':0}
+        'id':self.json_variables['current_checkout']['reward']['id']} \
+        if ('current_checkout' in self.json_variables and
+        self.json_variables['current_checkout']['amount'] > 0) else {'amount':0,'id':0}
 
         # pprint.pprint(self.rewards)
         # pprint.pprint(self.pre_pledged)
@@ -182,31 +198,39 @@ class KickstarterPledgeManage:
         self.parser = parser
         self.proxy_handler = urllib2.ProxyHandler({})
         self.blank_opener = urllib2.build_opener(self.proxy_handler)
+        self.logger = logging.getLogger("manage")
 
     def run_test(self):
+    	self.logger.debug('Starting cookie test')
         self.engage_cookie() # use the cookies
         self.parser.process() # fetch the page
         result = self.parser.logged_in
+    	self.logger.debug('Completed cookie test')
         self.disengage_cookie()
 
         # pprint.pprint(self.parser.json_variables, indent = 2)
         return result
 
-    def change_pledge(self, id):
+    def change_pledge(self, id, multiply_ = 1, add_ = 0):
+    	self.logger.debug('Changing pledge')
         self.engage_cookie() # use the cookies
         rewards = self.parser.process() # fetch the page
 
-        print 'Creating re-pledge request'
+    	self.logger.info('Creating re-pledge request')
         submit_data = self.parser.form_hidden_inputs
-        # urllib.encode doesn't support encoding of utf8 characters
-        submit_data['utf8'] = ''
-        submit_data['backing[amount]'] = s[0]
+        
+        submit_data['utf8'] = '' # urllib.encode doesn't support encoding of utf8 characters
+        submit_data['backing[amount]'] = s[0] * multiply_
         if submit_data['backing[domestic]'] == '0':
             submit_data['backing[amount]'] += s[5] #international shipping
+        submit_data['backing[amount]'] += s[0] * add_
         submit_data['backing[backer_reward_id]'] = id
         data = urllib.urlencode(submit_data)
 
         result = urllib2.urlopen(url=post_url, data=data).read()
+
+        #TODO: verify whether the re-pledge was a success
+
         self.disengage_cookie()
 
     def engage_cookie(self):
@@ -254,24 +278,27 @@ parser.add_argument("-c", "--cookies", type=file,
     metavar="COOKIES-FILE",
     help="path to the cookies file used to manage the pledge" +
     " (only the Netscape format is accepted)")
-parser.add_argument("-d", "--destroy", action="store_true",
-    help="destroy (/cancel) pledge if the required pledge(s) couldn't be" +
-    " selected (requires cookies)")
-parser.add_argument("-dt", "--destroy-threshhold", type=int,
-    choices=xrange(1, 11), default=5,
-    help="time (in minutes) to project completion to destroy (cancel) the pledge" +
-    " (default: %(default)s) (requires cookies)")
+# parser.add_argument("-d", "--destroy", action="store_true",
+#     help="destroy (/cancel) pledge if the required pledge(s) couldn't be" +
+#     " selected (requires cookies)")
+# parser.add_argument("-dt", "--destroy-threshhold", type=int,
+#     choices=xrange(1, 11), default=5,
+#     help="time (in minutes) to project completion to destroy (cancel) the pledge" +
+#     " (default: %(default)s) (requires cookies)")
 parser.add_argument("-p", "--pledge", nargs="*", type=int,
     help="pledges (numbers separated by spaces) ordered" +
     " by priority, highest to lowest")
 parser.add_argument("-pa", "--pledge-amount", action='store_true',
     help="pledges specified in terms of the currency amount")
+parser.add_argument("-pm", "--pledge-multiple", type=int, default=1,
+    help="multiply the pledge amount with this factor")
+parser.add_argument("-fa", "--fixed-addition", type=int, default=0,
+    help="add to the pledge amount")
 parser.add_argument("-np", "--no-priority", action="store_true",
     help="pledges don't have any priority")
 args = parser.parse_args()
 
-pprint.pprint(args)
-# sys.exit(0)
+logger.debug("Parsed args - " + pprint.pformat(args))
 
 # Generate the URL
 url = args.url.split('?', 1)[0]  # drop the stuff after the ?
@@ -292,51 +319,56 @@ ks = KickstarterHTMLParser(url)
 if args.cookies:
     # need to test the credentials
     use_credentials = True
-    print 'Testing supplied credentials (cookies)'
+    logger.info('Testing supplied credentials (cookies)')
     pledge_manage = KickstarterPledgeManage(args.cookies.name, ks)
     if not pledge_manage.run_test():
-        print 'Unable to login to Kickstarter using the cookies provided'
+        logger.info('Unable to login to Kickstarter using the cookies provided')
         sys.exit(0)
     else:
-        print 'Successfully logged into Kickstarter using cookies'
+        logger.info('Successfully logged into Kickstarter using cookies')
+
+if args.pledge_amount:
+    logger.debug('Pledges are given in amount')
+    pledges = args.pledge
+else:
+    logger.debug('Pledges are given by ID')
+    ids = args.pledge
 
 while True:
 
     rewards = ks.process()
 
     if not rewards:
-        print 'No limited rewards for this Kickstarter'
+        logger.info('No limited rewards for this Kickstarter')
         sys.exit(0)
-
-    if args.pledge_amount:
-        pledges = args.pledge
-    else:
-        ids = args.pledge
 
     if ids:
         selected = [r for r in rewards if r[3] in ids]
     else:
         if pledges:
             selected = [r for r in rewards if r[0] in pledges]
+            pledges = None
         else:
             # If a pledge amount was not specified on the command-line, then prompt
             # the user with a menu
             selected = pledge_menu(rewards)
 
+        # pprint.pprint(selected)
         ids = [s[3] for s in selected]
         stats = [s[1] for s in selected]
         priority = range(0,len(ids))
         pledge_priority_reached = len(ids) + 1
 
     for stat, s, id, current_priority in zip(stats, selected, ids, priority):
-        if stat != s[1] or s[2] == 'Unlimited' and current_priority < pledge_priority_reached:
+
+        if s[1] > 0 or s[2] == 'Unlimited' and current_priority < pledge_priority_reached:
 
             if use_credentials:
-                manage_pledge.change(id)
+                manage_pledge.change_pledge(id, args.pledge_multiple, args.fixed_addition)
                 print 'Re-pledged!!!'
             else :
-                if args.no-browser:
-                    print 'Alert!!! Monitored pledge is unlocked'
+                if args.no_browser:
+                    print 'Alert!!! Monitored pledge is unlocked: ', s[4]
                 else:
                     webbrowser.open_new_tab(url)
                     time.sleep(10)   # Give the web browser time to opens
@@ -346,9 +378,11 @@ while True:
             # ids = [x for x in ids if x != id]   # Remove the pledge we just found
             # priority.pop()
 
-            if not pledge_priority_reached == 0:
-                del ids[current_priority:len(ids)] # Remove the pledge we just found, and all the ones after it
-                priority = range(0,len(ids)) # Re-cache the priorities
+            del ids[current_priority:len(ids)] # Remove the pledge we just found, and all the ones after it
+            del selected[current_priority:len(selected)] # Remove the pledge we just found, and all the ones after it
+            priority = range(0,len(ids)) # Re-cache the priorities
+
+            logger.debug('Priority reached - ' + str(pledge_priority_reached) + ', Left ids - ' + pprint.pformat(ids))
 
             # If the top priority is reached or there are no more pledges to check, then exit
             if (not args.no_priority and pledge_priority_reached == 0) or not ids:
