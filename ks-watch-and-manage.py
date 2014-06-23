@@ -266,8 +266,8 @@ parser = argparse.ArgumentParser(
     " or optionally, change your pledge automatically.")
 parser.add_argument("url", help="project home page URL",
     metavar="URL")
-parser.add_argument("-v", "--verbose", action="store_true",
-    help="ask questions to set up the options")
+# parser.add_argument("-v", "--verbose", action="store_true",
+#     help="ask questions to set up the options")
 parser.add_argument("-i", "--interval", type=int,
     choices=xrange(1, 11), default=5,
     help="frequency in minutes to check the project page for changes" +
@@ -291,9 +291,9 @@ parser.add_argument("-p", "--pledge", nargs="*", type=int,
 parser.add_argument("-pa", "--pledge-amount", action='store_true',
     help="pledges specified in terms of the currency amount")
 parser.add_argument("-pm", "--pledge-multiple", type=int, default=1,
-    help="multiply the pledge amount with this factor")
+    help="multiply the pledge amount with this factor (default: 1)")
 parser.add_argument("-fa", "--fixed-addition", type=int, default=0,
-    help="add to the pledge amount")
+    help="add to the pledge amount (default: 0)")
 parser.add_argument("-np", "--no-priority", action="store_true",
     help="pledges don't have any priority")
 args = parser.parse_args()
