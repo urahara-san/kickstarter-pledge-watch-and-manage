@@ -102,41 +102,52 @@ In-built help message:
                                 add to the pledge amount (default: 0)
           -np, --no-priority    pledges don't have any priority
 
-Examples
+### Examples
 
-Basic
+#### Basic
 
         ./ks-watch-and-manage.py https://www.kickstarter.com/projects/12345678/some-project-i-love/
 
-    Next you will get a list of pledges avaialbe in the project and a prompt to "Select pledge levels"
-    wherein you can enter multiple pledges (numbers based on the list displayed) in order of priority
-    highest to lowest.
+Next you will get a list of pledges avaialbe in the project and a prompt to "Select pledge levels"
+wherein you can enter multiple pledges (numbers based on the list displayed) in order of priority
+highest to lowest.
 
-    The script will monitor the pledges entered and open the manage plede page in the default browser.
+The script will monitor the pledges entered and open the manage plede page in the default browser.
 
-    Note: The script will keep running until the highest priority pledge is unlocked.
+Note: The script will keep running until the highest priority pledge is unlocked.
 
 
-No priorities
+#### No priorities
 
-    If you want the script to continue running until all selected pledges get unlocked, you an use the
-    no priority option as follows:
+If you want the script to continue running until all selected pledges get unlocked, you an use the
+no priority option as follows:
 
         ./ks-watch-and-manage.py --no-priority https://www.kickstarter.com/projects/12345678/some-project-i-love/
 
 
+#### Don't open the browser
 
-Don't open the browser
-
-    If you do not want to open the browser automatically, rather just give an alert in the console do this:
+If you do not want to open the browser automatically, rather just give an alert in the console do this:
 
         ./ks-watch-and-manage.py --no-browser https://www.kickstarter.com/projects/12345678/some-project-i-love/
 
 
-Custom interval to check for pledge availability
+#### Custom interval to check for pledge availability
 
-    Check the page for unlocked pledges once every 10 minutes. 
+Check the page for unlocked pledges once every 10 minutes. 
 
         ./ks-watch-and-manage.py --interval 10 https://www.kickstarter.com/projects/12345678/some-project-i-love/
 
-TODO: How to use the manage functionality.
+#### Automatic re-pledge
+
+First I urge you to read the disclaimer, if you haven't already done so.
+
+To be able re-pledge automatically there are some prerequisites without which it will not be possible.
+
+    1. Cookies from your browser, for authentication with KS, in the netscape cookie file format. Once you supply the file, the script will test to see if it can successfully login to KS. You can use the following extensions to get the required file:
+      * Chrome 
+      * Firefox 
+      * Safari 
+      * Opera
+
+    2. You need to make a pledge to the project and make sure that the payment gateway had authentication for the maximum amount that you expect this script to make. 
