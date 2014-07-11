@@ -67,6 +67,32 @@ states that they:
 Again, for the sake of clarity, I state that the automated pledge selection
 functionality may violate the TOS.
 
+License - BSD 2-Clause
+----------------------
+    Copyright 2013, Timur Tabi
+    Copyright 2014, Prakhar Birla
+
+    Redistribution and use in source and binary forms, with or without
+    modification, are permitted provided that the following conditions are met:
+
+     * Redistributions of source code must retain the above copyright notice,
+       this list of conditions and the following disclaimer.
+     * Redistributions in binary form must reproduce the above copyright notice,
+       this list of conditions and the following disclaimer in the documentation
+       and/or other materials provided with the distribution.
+
+    This software is provided by the copyright holders and contributors "as is"
+    and any express or implied warranties, including, but not limited to, the
+    implied warranties of merchantability and fitness for a particular purpose
+    are disclaimed. In no event shall the copyright holder or contributors be
+    liable for any direct, indirect, incidental, special, exemplary, or
+    consequential damages (including, but not limited to, procurement of
+    substitute goods or services; loss of use, data, or profits; or business
+    interruption) however caused and on any theory of liability, whether in
+    contract, strict liability, or tort (including negligence or otherwise)
+    arising in any way out of the use of this software, even if advised of
+    the possibility of such damage.
+
 Usage guidelines
 ----------------
 
@@ -106,7 +132,7 @@ In-built help message:
 
 #### Basic
 
-        ./ks-watch-and-manage.py https://www.kickstarter.com/projects/12345678/some-project-i-love/
+    ./ks-watch-and-manage.py https://www.kickstarter.com/projects/12345678/some-project-i-love/
 
 Next you will get a list of pledges avaialbe in the project and a prompt to "Select pledge levels"
 wherein you can enter multiple pledges (numbers based on the list displayed) in order of priority
@@ -122,32 +148,57 @@ Note: The script will keep running until the highest priority pledge is unlocked
 If you want the script to continue running until all selected pledges get unlocked, you an use the
 no priority option as follows:
 
-        ./ks-watch-and-manage.py --no-priority https://www.kickstarter.com/projects/12345678/some-project-i-love/
+    ./ks-watch-and-manage.py --no-priority https://www.kickstarter.com/projects/12345678/some-project-i-love/
 
 
 #### Don't open the browser
 
 If you do not want to open the browser automatically, rather just give an alert in the console do this:
 
-        ./ks-watch-and-manage.py --no-browser https://www.kickstarter.com/projects/12345678/some-project-i-love/
+    ./ks-watch-and-manage.py --no-browser https://www.kickstarter.com/projects/12345678/some-project-i-love/
 
 
 #### Custom interval to check for pledge availability
 
 Check the page for unlocked pledges once every 10 minutes. 
 
-        ./ks-watch-and-manage.py --interval 10 https://www.kickstarter.com/projects/12345678/some-project-i-love/
+    ./ks-watch-and-manage.py --interval 10 https://www.kickstarter.com/projects/12345678/some-project-i-love/
 
 #### Automatic re-pledge
 
-First I urge you to read the disclaimer, if you haven't already done so.
+*First I urge you to read the disclaimer, if you haven't already done so.*
 
 To be able re-pledge automatically there are some prerequisites without which it will not be possible.
 
-    1. Cookies from your browser, for authentication with KS, in the netscape cookie file format. Once you supply the file, the script will test to see if it can successfully login to KS. You can use the following extensions to get the required file:
-      * Chrome 
-      * Firefox 
-      * Safari 
-      * Opera
+1. Cookies from your browser, for authentication with KS, in the netscape cookie file format. Once you supply the file, the script will test to see if it can successfully login to KS. You can use the following extensions to get the required file:
+  * Chrome 
+  * Firefox 
+  * Safari 
+  * Opera
 
-    2. You need to make a pledge to the project and make sure that the payment gateway had authentication for the maximum amount that you expect this script to make. 
+2. You need have an active pledge to the project and make sure that the payment gateway has approval for the maximum amount that you expect this script to pledge. This is vital as the script doesn't check this amount and if it falls short the re-pledge will fail. Note: Kickstarter stores information about you location which influences the automatic addition of the shipping cost, if applicable.
+
+To run the script in re-pledge mode add the path to the cookies file as shown below:
+
+    ./ks-watch-and-manage.py --cookies ks_cookies.txt https://www.kickstarter.com/projects/12345678/some-project-i-love/
+
+All the previously given examples work in this mode as well. Following are options specific to this mode:
+
+##### Fixed addition
+
+Sometimes a project may have some add-ons for which you have to additionaly pledge an amount apart from the base.
+
+    ./ks-watch-and-manage.py --cookies ks_cookies.txt --fixed-addition 10 https://www.kickstarter.com/projects/12345678/some-project-i-love/
+
+##### Pledge multiple
+
+Recent policy changes have allowed pledges for multiple rewards from a single pledge, especially in the Product Design and Technology/Hardware sections. Here you can specify the number of times you would like to multiply the base amount with, while adding the shipping cost only once.
+
+    ./ks-watch-and-manage.py --cookies ks_cookies.txt --pledge-multiple 5 https://www.kickstarter.com/projects/12345678/some-project-i-love/
+
+Closing note
+------------
+
+> Kickstarter is not a marketplace. It is a platform for people to show their support for a cause or an idea.
+> When you use this tool make sure to be fair to others who might not be as well equipped, regardless of your aim to use this tool.
+> Many people may use this tool to get on the early bird pledge level. If you are one of them who end up saving some money, I urge you to invest it into another project at KS and ask for no rewards. With great power, comes great responsibility.
