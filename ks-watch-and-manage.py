@@ -364,7 +364,7 @@ while True:
         if s[1] > 0 or s[2] == 'Unlimited' and current_priority < pledge_priority_reached:
 
             if use_credentials:
-                manage_pledge.change_pledge(id, args.pledge_multiple, args.fixed_addition)
+                pledge_manage.change_pledge(id, args.pledge_multiple, args.fixed_addition)
                 print 'Re-pledged!!!'
             else :
                 if args.no_browser:
