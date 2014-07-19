@@ -58,7 +58,7 @@ class KickstarterHTMLParser(HTMLParser.HTMLParser):
         HTMLParser.HTMLParser.__init__(self)
         self.in_form_block = False    # True == we're inside an <form class='...'> block
         self.in_script_block = False # True == we're inside a <script> block
-        self.url = url
+        self.url = url + '/new'
         self.logger = logging.getLogger("parser")
 
     def process(self) :
@@ -191,7 +191,7 @@ class KickstarterHTMLParser(HTMLParser.HTMLParser):
         return self.rewards
 
 class KickstarterPledgeManage:
-    def __init__(self, cookies_file, parser):
+    def __init__(self, cookies_file, parser, url):
         self.cookie_jar = cookielib.MozillaCookieJar(cookies_file)
         self.cookie_jar.load()
         self.cookie_opener = urllib2.build_opener(urllib2.HTTPCookieProcessor(self.cookie_jar))
@@ -199,6 +199,7 @@ class KickstarterPledgeManage:
         self.proxy_handler = urllib2.ProxyHandler({})
         self.blank_opener = urllib2.build_opener(self.proxy_handler)
         self.logger = logging.getLogger("manage")
+        self.url = url
 
     def run_test(self):
     	self.logger.debug('Starting cookie test')
@@ -227,7 +228,7 @@ class KickstarterPledgeManage:
         submit_data['backing[backer_reward_id]'] = id
         data = urllib.urlencode(submit_data)
 
-        result = urllib2.urlopen(url=post_url, data=data).read()
+        result = urllib2.urlopen(url=self.url, data=data).read()
 
         #TODO: verify whether the re-pledge was a success
 
@@ -303,7 +304,7 @@ logger.debug("Parsed args - " + pprint.pformat(args))
 # Generate the URL
 url = args.url.split('?', 1)[0]  # drop the stuff after the ?
 base_url = url
-url += '/pledge/new' # we want the pledge-editing page
+url += '/pledge' # we want the pledge-editing page
 pledges = None   # The pledge amounts on the command line
 ids = None       # A list of IDs of the pledge levels
 selected = None  # A list of selected pledge levels
@@ -320,7 +321,7 @@ if args.cookies:
     # need to test the credentials
     use_credentials = True
     logger.info('Testing supplied credentials (cookies)')
-    pledge_manage = KickstarterPledgeManage(args.cookies.name, ks)
+    pledge_manage = KickstarterPledgeManage(args.cookies.name, ks, url)
     if not pledge_manage.run_test():
         logger.info('Unable to login to Kickstarter using the cookies provided')
         sys.exit(0)
