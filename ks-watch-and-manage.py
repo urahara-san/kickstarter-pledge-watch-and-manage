@@ -293,10 +293,12 @@ class KickstarterPledgeManage:
             pprint.pprint(submit_data)
             sys.exit(0)
 
+        # multiples
         submit_data['backing[amount]'] = pledge[0] * multiply_
         if 'backing[domestic]' in submit_data == '0':
             submit_data['backing[amount]'] += pledge[5] #international shipping
-        submit_data['backing[amount]'] += pledge[0] + add_
+        # fixed addition
+        submit_data['backing[amount]'] += add_
         submit_data['backing[backer_reward_id]'] = pledge[3]
         data = urllib.urlencode(submit_data)
 
