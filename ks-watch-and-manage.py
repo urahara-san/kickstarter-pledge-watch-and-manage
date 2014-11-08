@@ -41,7 +41,7 @@ import logging
 import getpass
 import subprocess
 
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("main")
 sys.stdout = codecs.getwriter('utf8')(sys.stdout)
 
@@ -435,7 +435,7 @@ if args.pledge_amount:
     pledges = args.pledge
 else:
     logger.debug('Pledges are given by ID')
-    ids = args.pledge
+    pledge_ids = args.pledge
 
 while True:
 
@@ -446,18 +446,22 @@ while True:
         sys.exit(0)
 
     if ids:
-        # Pledge specified by pledge menu order
-        selected = [val for idx, val in enumerate(rewards, start=1) if idx in ids]
+        # filter only those pleges that are selected for monitring
+        selected = [r for r in rewards if r[3] in ids]
     else:
         if pledges:
             selected = [r for r in rewards if r[0] in pledges]
             pledges = None
+        elif pledge_ids:
+            # Pledge specified by pledge menu order
+            selected = [val for idx, val in enumerate(rewards, start=1) if idx in pledge_ids]
         else:
             # If a pledge amount was not specified on the command-line, then prompt
             # the user with a menu
             selected = pledge_menu(rewards)
 
     # pprint.pprint(selected)
+    logger.debug('Selected pledges: ' + pprint.pformat(selected))
     ids = [s[3] for s in selected]
     stats = [s[1] for s in selected]
     priority = range(0,len(ids))
