@@ -2,7 +2,7 @@
 
 # Copyright 2013, Timur Tabi
 # Copyright 2014, Prakhar Birla
-# Copyright 2014, github.com/urahara-san
+# Copyright 2015, github.com/urahara-san
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions are met:
@@ -75,7 +75,9 @@ class KickstarterHTMLParser(HTMLParser.HTMLParser):
                 try:
                     url = self.url + '/' + page
                     self.logger.debug('Opening URL- ' + url)    
-                    f = urllib2.urlopen(url)
+                    req = urllib2.Request(url)
+                    req.add_header('User-Agent', 'Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/39.0.2171.95 Safari/537.36')
+                    f = urllib2.urlopen(req)
                     break
                 except urllib2.HTTPError as e:
                     self.logger.error('HTTP Error', exc_info=True)
@@ -94,7 +96,9 @@ class KickstarterHTMLParser(HTMLParser.HTMLParser):
 
         self.rewards = []
         self.form_hidden_inputs = {}
+        self.form_inputs = {}
         self.json_variables = {}
+        self.reward_properties = {}
 
         self.logger.debug('Parsing fetched content')
         self.feed(html)   # feed() starts the HTMLParser parsing
@@ -146,9 +150,6 @@ class KickstarterHTMLParser(HTMLParser.HTMLParser):
             self.logger.info("Must enter password")
             return
 
-        # TODO instead of this, just read the meta tags
-        # and disengage the parsing when the body tag is reached
-
         # It turns out that we only care about tags that have a 'class' attribute
         if not 'class' in attrs:
             return
@@ -162,9 +163,18 @@ class KickstarterHTMLParser(HTMLParser.HTMLParser):
                 return
 
 
-        if self.in_form_block and tag == 'input' and attrs['class'] == 'hidden':
-            self.form_hidden_inputs[attrs['name']] = attrs['value']
+        if self.in_form_block and tag == 'input':
+            if attrs['class'] == 'hidden':
+                self.form_hidden_inputs[attrs['name']] = attrs['value']
+            else:
+                self.form_inputs[attrs['name']] = attrs['value']
             return
+
+        if self.in_form_block and tag == 'li' and 'data-reward' in attrs:
+            result = json.loads(attrs['data-reward']) # json decode the string.. i.e. make it an object
+            if 'id' in result:
+                self.reward_properties[result['id']] = result
+        return
 
     def handle_endtag(self, tag):
         if tag == 'form':
@@ -263,6 +273,7 @@ class KickstarterPledgeManage:
         rewards = self.parser.process('edit') # fetch the page
 
         submit_data = self.parser.form_hidden_inputs
+        submit_data_visible = self.parser.form_inputs
         #pprint.pprint(self.parser)
 
         if self.parser.must_enter_password:
@@ -288,13 +299,20 @@ class KickstarterPledgeManage:
 
         submit_data['utf8'] = '' # urllib.encode doesn't support encoding of utf8 characters
 
-        if 'backing[amount]' not in submit_data:
+        if 'backing[original_pledge]' not in submit_data:
             self.logger.error('Unable to get the edit pledge page')
             pprint.pprint(submit_data)
             sys.exit(0)
 
+        # location handling
+        submit_data['backing[location_id]'] = self.parser.json_variables['current_checkout']['location_id']
+
         # multiples
         submit_data['backing[amount]'] = pledge[0] * multiply_
+        # reward properties
+        reward_properties = self.parser.reward_properties[pledge[3]]
+        if reward_properties['shipping_enabled'] == True:
+            submit_data['backing[amount]'] += next((float(item['cost']) for item in reward_properties['shipping_rules'] if item["location_id"] == submit_data['backing[location_id]']), 0.0)
         if 'backing[domestic]' in submit_data == '0':
             submit_data['backing[amount]'] += pledge[5] #international shipping
         # fixed addition
@@ -306,14 +324,20 @@ class KickstarterPledgeManage:
 
         html = unicode(result.read(), 'utf-8')
         result.close()
-
-        text_file = open("re_pledge_response.html", "w")
-        text_file.write(html.encode('utf-8'))
-        text_file.close()
-
-        #TODO: verify whether the re-pledge was a success
+        html = html.encode('utf-8')
 
         self.disengage_cookie()
+
+        # write result to file
+        #text_file = open("re_pledge_response.html", "w")
+        #text_file.write(html)
+        #text_file.close()
+
+        # verify whether the re-pledge was a success
+        success_or_not = html.rfind('Your pledge has been updated.')
+        if success_or_not != -1:
+            return True
+        return False
 
     def engage_cookie(self):
         urllib2.install_opener(self.cookie_opener)
@@ -474,8 +498,10 @@ while True:
         if s[1] > 0 or s[2] == 'Unlimited' and current_priority < pledge_priority_reached:
 
             if use_cookies:
-                pledge_manage.change_pledge(s, args.pledge_multiple, args.fixed_addition)
-                print 'Re-pledged!!!'
+                if pledge_manage.change_pledge(s, args.pledge_multiple, args.fixed_addition):
+                    print 'Re-pledged!!!'
+                else:
+                    print 'Re-pledge operation failed. Try a manual approach.'
             else :
                 if args.no_browser:
                     if args.command:
