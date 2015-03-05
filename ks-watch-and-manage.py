@@ -41,8 +41,6 @@ import logging
 import getpass
 import subprocess
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("main")
 sys.stdout = codecs.getwriter('utf8')(sys.stdout)
 
 # Instead of parsing the HTML, we will parse some Javascript variables
@@ -101,10 +99,14 @@ class KickstarterHTMLParser(HTMLParser.HTMLParser):
         self.reward_properties = {}
 
         self.logger.debug('Parsing fetched content')
+
+        if debug_mode:
+            ext_file = open("http_reponse.html", "w")
+            ext_file.write(html.encode('utf-8'))
+            ext_file.close()
+
         self.feed(html)   # feed() starts the HTMLParser parsing
-        #text_file = open("http_reponse.html", "w")
-        #text_file.write(html.encode('utf-8'))
-        #text_file.close()
+        
         self.logger.debug('Completed parsing content')
 
         # if the json variable current_project was loaded, then
@@ -167,7 +169,10 @@ class KickstarterHTMLParser(HTMLParser.HTMLParser):
             if attrs['class'] == 'hidden':
                 self.form_hidden_inputs[attrs['name']] = attrs['value']
             else:
-                self.form_inputs[attrs['name']] = attrs['value']
+                if 'value' in attrs:
+                    self.form_inputs[attrs['name']] = attrs['value']
+                else:
+                    self.form_inputs[attrs['name']] = None
             return
 
         if self.in_form_block and tag == 'li' and 'data-reward' in attrs:
@@ -257,14 +262,45 @@ class KickstarterPledgeManage:
         self.login = login
 
     def run_test(self):
-        self.logger.debug('Starting cookie test')
+        self.logger.debug('Starting login test')
         self.engage_cookie() # use the cookies
-        self.parser.process() # fetch the page
-        result = self.parser.logged_in
-        self.logger.debug('Completed cookie test')
-        self.disengage_cookie()
 
-        # pprint.pprint(self.parser.json_variables, indent = 2)
+        rewards = self.parser.process('edit') # fetch the page
+
+        submit_data = self.parser.form_hidden_inputs
+        submit_data_visible = self.parser.form_inputs
+        #pprint.pprint(self.parser)
+
+        result = self.parser.logged_in
+
+        if self.parser.must_enter_password and (not self.login or not self.password):
+            result = False
+            self.logger.info('Login with cookies successfull, however need username and password to pass verification')
+        elif self.parser.must_enter_password:
+            submit_data['user_session[password]'] = self.password
+            submit_data['user_session[email]'] = self.login
+            submit_data['utf8'] = '' # urllib.encode doesn't support encoding of utf8 characters
+
+            #pprint.pprint(submit_data)
+
+            data = urllib.urlencode(submit_data)
+            f = urllib2.urlopen(url='https://www.kickstarter.com' + self.parser.password_verify_target, data=data)
+            html = unicode(f.read(), 'utf-8')
+            f.close()
+            
+            if debug_mode:
+                text_file = open("login_reponse.html", "w")
+                text_file.write(html.encode('utf-8'))
+                text_file.close()
+            
+            #self.cookie_jar.save()
+            rewards = self.parser.process('edit', html)
+            submit_data = self.parser.form_hidden_inputs
+            if 'authenticity_token' not in submit_data:
+                result = False
+        
+        self.logger.debug('Completed login test')
+        self.disengage_cookie()
         return result
 
     def change_pledge(self, pledge, multiply_ = 1, add_ = 0):
@@ -274,22 +310,23 @@ class KickstarterPledgeManage:
 
         submit_data = self.parser.form_hidden_inputs
         submit_data_visible = self.parser.form_inputs
-        #pprint.pprint(self.parser)
 
         if self.parser.must_enter_password:
             submit_data['user_session[password]'] = self.password
             submit_data['user_session[email]'] = self.login
             submit_data['utf8'] = '' # urllib.encode doesn't support encoding of utf8 characters
             #pprint.pprint(submit_data)
-            #pprint.pprint(self.login)
-            #pprint.pprint(self.password)
+            
             data = urllib.urlencode(submit_data)
             f = urllib2.urlopen(url='https://www.kickstarter.com' + self.parser.password_verify_target, data=data)
             html = unicode(f.read(), 'utf-8')
             f.close()
-            text_file = open("login_reponse.html", "w")
-            text_file.write(html.encode('utf-8'))
-            text_file.close()
+
+            if debug_mode:
+                text_file = open("login_reponse.html", "w")
+                text_file.write(html.encode('utf-8'))
+                text_file.close()
+            
             #self.cookie_jar.save()
             rewards = self.parser.process('edit', html)
             submit_data = self.parser.form_hidden_inputs
@@ -328,16 +365,50 @@ class KickstarterPledgeManage:
 
         self.disengage_cookie()
 
-        # write result to file
-        #text_file = open("re_pledge_response.html", "w")
-        #text_file.write(html)
-        #text_file.close()
+        if debug_mode:
+            # write result to file
+            text_file = open("re_pledge_response.html", "w")
+            text_file.write(html)
+            text_file.close()
 
         # verify whether the re-pledge was a success
         success_or_not = html.rfind('Your pledge has been updated.')
         if success_or_not != -1:
             return True
         return False
+
+    def get_current_pledge(self):
+        self.logger.debug('Getting current pledge pledge')
+        self.engage_cookie() # use the cookies
+        rewards = self.parser.process('edit') # fetch the page
+
+        submit_data = self.parser.form_hidden_inputs
+        submit_data_visible = self.parser.form_inputs
+
+        if self.parser.must_enter_password:
+            submit_data['user_session[password]'] = self.password
+            submit_data['user_session[email]'] = self.login
+            submit_data['utf8'] = '' # urllib.encode doesn't support encoding of utf8 characters
+            #pprint.pprint(submit_data)
+            
+            data = urllib.urlencode(submit_data)
+            f = urllib2.urlopen(url='https://www.kickstarter.com' + self.parser.password_verify_target, data=data)
+            html = unicode(f.read(), 'utf-8')
+            f.close()
+
+            if debug_mode:
+                text_file = open("login_reponse.html", "w")
+                text_file.write(html.encode('utf-8'))
+                text_file.close()
+            
+            rewards = self.parser.process('edit', html)
+            submit_data = self.parser.form_hidden_inputs
+
+        if 'current_checkout' in self.parser.json_variables:
+            if 'reward' in self.parser.json_variables['current_checkout'] and self.parser.json_variables['current_checkout']['reward']:
+                if 'id' in self.parser.json_variables['current_checkout']['reward']:
+                    return self.parser.json_variables['current_checkout']['reward']['id']
+        return 0
 
     def engage_cookie(self):
         urllib2.install_opener(self.cookie_opener)
@@ -358,7 +429,7 @@ def pledge_menu(rewards):
         return rewards[0]
 
     for i in xrange(count):
-        print '%u. $%u %s' % (i + 1, rewards[i][0], rewards[i][4][:70])
+        print '%u. %s$%u %s (%s)' % (i + 1, ('**' if current_pledge == str(rewards[i][3]) else ''), rewards[i][0],rewards[i][4][:70], rewards[i][3])
         print '\t\t %s' % (rewards[i][2])
 
     while True:
@@ -411,7 +482,25 @@ parser.add_argument("-np", "--no-priority", action="store_true",
     help="pledges don't have any priority")
 parser.add_argument("-cmd", "--command", type=str,
     help="execute command on a change detection (only when using no-browser)")
+parser.add_argument("-d", "--debug", action='store_true',
+    help="enable debug mode")
+parser.add_argument("-t", "--timestamp", action='store_true',
+    help="show timestamps for each query")
 args = parser.parse_args()
+
+debug_mode = False
+show_timestamps = False
+if args.timestamp:
+    show_timestamps = True
+if args.debug:
+    debug_mode = True
+    show_timestamps = True
+    logging.basicConfig(level=logging.DEBUG)
+else:
+    logging.basicConfig(level=logging.INFO)
+
+logger = logging.getLogger("main")
+
 
 logger.debug("Parsed args - " + pprint.pformat(args))
 
@@ -429,32 +518,36 @@ use_login = False
 stats = None   # A list of the initial statuses of the selected pledge level
 priority = None
 test_passed = True
+current_pledge = '0'
 
 ks = KickstarterHTMLParser(url)
-
-if args.cookies:
-    # need to test the credentials
-    use_cookies = True
-    logger.info('Testing supplied credentials (cookies)')
-    pledge_manage = KickstarterPledgeManage(args.cookies.name, ks, url)
-    if not pledge_manage.run_test():
-        logger.info('Unable to login to Kickstarter using the cookies provided')
-        sys.exit(0)
-    else:
-        logger.info('Successfully logged into Kickstarter using cookies')
 
 if args.login:
     use_cookies = True
     password = getpass.getpass('Enter account password :') if not args.password else args.password
     login = args.login
     logger.info('Testing supplied credentials (username)')
-    logger.info(login)
-    logger.info(password)
     if not args.cookies:
         pledge_manage = KickstarterPledgeManage(None, ks, url, login=login, password=password)
     else:
         pledge_manage = KickstarterPledgeManage(args.cookies.name, ks, url, login=login, password=password)
+elif args.cookies:
+    pledge_manage = KickstarterPledgeManage(args.cookies.name, ks, url)
+else:
+    logger.info('No credentials given, can only watch pledges')
 
+if args.cookies:
+    # need to test the credentials
+    use_cookies = True
+    logger.info('Testing supplied credentials (cookies)')
+    if not pledge_manage.run_test():
+        logger.info('Unable to login to Kickstarter using the cookies provided')
+        sys.exit(0)
+    else:
+        logger.info('Successfully logged into Kickstarter using cookies')
+    logger.info('Checking current pledge status')
+    current_pledge = str(pledge_manage.get_current_pledge())
+    logger.info('Current pledge: ' + current_pledge)
 
 if args.pledge_amount:
     logger.debug('Pledges are given in amount')
@@ -465,6 +558,8 @@ else:
 
 while True:
 
+    if show_timestamps:
+        logger.info('Pinging KS at ' + time.strftime("%d/%m/%Y %H:%M:%S") )
     rewards = ks.process()
 
     if not rewards:
@@ -486,7 +581,6 @@ while True:
             # the user with a menu
             selected = pledge_menu(rewards)
 
-    # pprint.pprint(selected)
     logger.debug('Selected pledges: ' + pprint.pformat(selected))
     ids = [s[3] for s in selected]
     stats = [s[1] for s in selected]
@@ -498,10 +592,18 @@ while True:
         if s[1] > 0 or s[2] == 'Unlimited' and current_priority < pledge_priority_reached:
 
             if use_cookies:
+                repledge_success = False
                 if pledge_manage.change_pledge(s, args.pledge_multiple, args.fixed_addition):
+                    repledge_success = True
+                else:
+                    current_pledge = str(pledge_manage.get_current_pledge())
+                    if current_pledge == str(s[3]):
+                        repledge_success = True
+
+                if repledge_success:
                     print 'Re-pledged!!!'
                 else:
-                    print 'Re-pledge operation failed. Try a manual approach.'
+                    print 'Re-pledge operation failed. Try the browser approach.'
             else :
                 if args.no_browser:
                     if args.command:
@@ -519,9 +621,6 @@ while True:
 
             pledge_priority_reached = current_priority
             
-            # ids = [x for x in ids if x != id]   # Remove the pledge we just found
-            # priority.pop()
-
             del ids[current_priority:len(ids)] # Remove the pledge we just found, and all the ones after it
             del selected[current_priority:len(selected)] # Remove the pledge we just found, and all the ones after it
             priority = range(0,len(ids)) # Re-cache the priorities
@@ -530,11 +629,12 @@ while True:
 
             # If the top priority is reached or there are no more pledges to check, then exit
             if (not args.no_priority and pledge_priority_reached == 0) or not ids:
+                logger.info('My job is done')
                 sys.exit(0)
             break   # Otherwise, keep going
 
+    if show_timestamps:
+        print time.strftime("%d/%m/%Y %H:%M:%S") + " "
     print [str(s[2]) for s in selected]
-
-    # pprint.pprint(selected)
 
     time.sleep(60 * args.interval) # sleep until the next try
